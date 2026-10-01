@@ -1,0 +1,4 @@
+[resolver]
+# Prefer dependency versions compatible with `rust-version` so the crate
+# builds with distro toolchains (e.g. Ubuntu 24.04 rustc-1.80).
+incompatible-rust-versions = "fallback"

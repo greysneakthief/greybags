@@ -1,0 +1,25 @@
+# greybags custom watchlist example
+#
+# Usage: greybags analyze --watchlist contrib/watchlist.txt <hives>
+#
+# Format, one rule per line:
+#   [severity:] pattern [| label]
+# severity : info | low | medium | high   (default: low)
+# pattern  : case-insensitive substring of a single folder name, or
+#            re:<regex> for a case-insensitive regular expression
+# label    : optional text shown in the finding title
+#
+# Rules are matched against each folder name (path segment), not the full
+# path, and the first matching rule wins. Built-in rules (offensive tools,
+# anti-forensics, staging names...) are applied too unless you pass
+# --no-builtin-watchlist.
+
+# Case-specific terms (replace with names from your case brief)
+high: project falcon | Codename from case brief
+high: re:^acme[_ -]?(payroll|hr|finance) | Victim business data
+medium: re:\b(customer|client)[_ -]?(list|db|export) | Bulk customer data
+
+# Data-handling patterns
+medium: re:\.(kdbx|pst|ost)$ | Credential vault / mailbox file opened as folder
+low: re:^backup(s)?[_ -]?\d{4} | Dated backup folder
+low: re:^(new folder|neuer ordner|nouveau dossier)( \(\d+\))?$ | Freshly created, unnamed folder

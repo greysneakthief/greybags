@@ -16,7 +16,10 @@ pub struct ExtensionBlock {
     #[serde(serialize_with = "hex32")]
     pub signature: u32,
     pub name: &'static str,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "super::pairs_as_map"
+    )]
     pub details: Vec<(String, String)>,
 }
 

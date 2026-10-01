@@ -136,7 +136,7 @@ pub struct ShellItem {
     pub extension_blocks: Vec<ExtensionBlock>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<Property>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty", serialize_with = "pairs_as_map")]
     pub details: Vec<(String, String)>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
@@ -148,6 +148,16 @@ pub struct ShellItem {
 
 fn hex8<S: Serializer>(v: &u8, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(&format!("0x{v:02x}"))
+}
+
+/// Serialises ordered key/value pairs as a JSON object (insertion order kept).
+pub fn pairs_as_map<S: Serializer>(v: &[(String, String)], s: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeMap;
+    let mut m = s.serialize_map(Some(v.len()))?;
+    for (k, val) in v {
+        m.serialize_entry(k, val)?;
+    }
+    m.end()
 }
 
 fn hex_bytes<S: Serializer>(v: &[u8], s: S) -> Result<S::Ok, S::Error> {

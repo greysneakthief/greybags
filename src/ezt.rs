@@ -54,6 +54,31 @@ pub fn locate(explicit: Option<&Path>) -> Option<PathBuf> {
     candidates.into_iter().find(|c| c.is_file())
 }
 
+/// Finds the `dotnet` host: `$PATH`, `$DOTNET_ROOT`, the per-user location
+/// used by Microsoft's dotnet-install.sh, then the Debian/Ubuntu and
+/// Microsoft package locations.
+pub fn locate_dotnet() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let c = dir.join("dotnet");
+            if c.is_file() {
+                return Some(c);
+            }
+        }
+    }
+    let mut candidates = Vec::new();
+    if let Ok(root) = std::env::var("DOTNET_ROOT") {
+        candidates.push(PathBuf::from(root).join("dotnet"));
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        candidates.push(PathBuf::from(home).join(".dotnet/dotnet"));
+    }
+    candidates.push(PathBuf::from("/usr/lib/dotnet/dotnet"));
+    candidates.push(PathBuf::from("/usr/share/dotnet/dotnet"));
+    candidates.push(PathBuf::from("/opt/dotnet/dotnet"));
+    candidates.into_iter().find(|c| c.is_file())
+}
+
 /// Builds the command used to launch SBECmd.
 pub fn command(sbecmd: &Path, dotnet: Option<&Path>) -> Result<Command, String> {
     let ext = sbecmd
@@ -78,11 +103,16 @@ pub fn command(sbecmd: &Path, dotnet: Option<&Path>) -> Result<Command, String> 
     };
     let mut cmd = match dll {
         Some(d) => {
-            let mut c = Command::new(
-                dotnet
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| PathBuf::from("dotnet")),
-            );
+            let exe = dotnet.map(Path::to_path_buf).or_else(locate_dotnet).ok_or_else(|| {
+                "the .NET runtime (dotnet) was not found; run scripts/install-sbecmd.sh or pass --dotnet".to_string()
+            })?;
+            let mut c = Command::new(&exe);
+            // A user-local runtime (~/.dotnet) needs DOTNET_ROOT to find its frameworks.
+            if std::env::var_os("DOTNET_ROOT").is_none() {
+                if let Some(root) = exe.parent() {
+                    c.env("DOTNET_ROOT", root);
+                }
+            }
             c.arg(d);
             c
         }
@@ -250,6 +280,7 @@ pub fn compare(ours: &[ShellBagEntry], theirs: &[SbeRow], include_recovered: boo
             .or_default()
             .push(r);
     }
+    let raw_paths = raw_namespace_paths(&ours);
     let mut our_set: HashSet<String> = HashSet::new();
     let mut matched = 0;
     let mut only_ours = Vec::new();
@@ -258,7 +289,7 @@ pub fn compare(ours: &[ShellBagEntry], theirs: &[SbeRow], include_recovered: boo
         // Try both our namespace path and the UNC-preserving variant.
         let keys = [
             normalize(&e.absolute_path),
-            normalize(&raw_namespace_path(e, &ours)),
+            normalize(raw_paths.get(&e.id).map(String::as_str).unwrap_or("")),
         ];
         let hit = keys.iter().find(|k| their_map.contains_key(*k)).cloned();
         match hit {
@@ -304,24 +335,28 @@ pub fn compare(ours: &[ShellBagEntry], theirs: &[SbeRow], include_recovered: boo
     }
 }
 
-/// Rebuilds the path using raw item names (keeps `\\server\share` forms),
-/// which is closer to how some tools render network paths.
-fn raw_namespace_path(e: &ShellBagEntry, all: &[&ShellBagEntry]) -> String {
-    let by_id: HashMap<usize, &&ShellBagEntry> = all.iter().map(|x| (x.id, x)).collect();
-    let mut segs = vec![e.item.segment()];
-    let mut cur = e.parent_id;
-    let mut guard = 0;
-    while let Some(id) = cur {
-        let Some(p) = by_id.get(&id) else { break };
-        segs.push(p.item.segment());
-        cur = p.parent_id;
-        guard += 1;
-        if guard > 256 {
-            break;
+/// Rebuilds every entry's path from raw item names (keeps `\\server\share`
+/// forms), which is closer to how some tools render network paths.
+fn raw_namespace_paths(all: &[&ShellBagEntry]) -> HashMap<usize, String> {
+    let by_id: HashMap<usize, &ShellBagEntry> = all.iter().map(|x| (x.id, *x)).collect();
+    let mut out = HashMap::with_capacity(all.len());
+    for e in all {
+        let mut segs = vec![e.item.segment()];
+        let mut cur = e.parent_id;
+        let mut guard = 0;
+        while let Some(id) = cur {
+            let Some(p) = by_id.get(&id) else { break };
+            segs.push(p.item.segment());
+            cur = p.parent_id;
+            guard += 1;
+            if guard > 256 {
+                break;
+            }
         }
+        segs.reverse();
+        out.insert(e.id, segs.join("\\"));
     }
-    segs.reverse();
-    segs.join("\\")
+    out
 }
 
 #[cfg(test)]
